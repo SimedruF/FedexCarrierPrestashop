@@ -108,15 +108,19 @@ class FedexCarrier extends CarrierModule
         $carrier->deleted = 0;
         $carrier->shipping_handling = false;
         $carrier->range_behavior = 0;
-        $carrier->delay = array(
-            Language::getIsoById(Configuration::get('PS_LANG_DEFAULT')) => 'Deliver with Fedex'
-        );
+        
+        // Setează delay pentru toate limbile active
+        $languages = Language::getLanguages(true);
+        foreach ($languages as $language) {
+            $carrier->delay[$language['id_lang']] = 'Deliver with Fedex';
+        }
+        
         $carrier->shipping_external = true;
         $carrier->is_module = true;
         $carrier->external_module_name = $this->name;
         $carrier->need_range = true;
         
-        // Adăugat pentru a asigura vizibilitatea în admin
+        // Adaugă aceste proprietăți pentru mai multă siguranță
         $carrier->shipping_method = Carrier::SHIPPING_METHOD_WEIGHT;
         $carrier->max_weight = 999;
         $carrier->grade = 9;
