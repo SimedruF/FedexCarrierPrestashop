@@ -431,5 +431,16 @@ class FedexCarrier extends CarrierModule
         
         return false;
     }
+    /**
+     * Add JS/CSS in back office header
+     */
+    public function hookDisplayBackOfficeHeader()
+    {
+        if (Tools::getValue('configure') == $this->name) {
+            // Adaugă CSS și/sau JavaScript pentru pagina de configurare a modulului
+            $this->context->controller->addJS($this->_path.'views/js/back.js');
+            $this->context->controller->addCSS($this->_path.'views/css/back.css');
+        }
+    }
 }
 
