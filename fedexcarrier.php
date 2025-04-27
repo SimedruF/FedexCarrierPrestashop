@@ -116,20 +116,25 @@ class FedexCarrier extends CarrierModule
         $carrier->external_module_name = $this->name;
         $carrier->need_range = true;
         
+        // Adăugat pentru a asigura vizibilitatea în admin
+        $carrier->shipping_method = Carrier::SHIPPING_METHOD_WEIGHT;
+        $carrier->max_weight = 999;
+        $carrier->grade = 9;
+        
         if ($carrier->add()) {
-            // Save the carrier ID
+            // Salvează ID-ul transportatorului
             Configuration::updateValue('FEDEX_CARRIER_ID', (int)$carrier->id);
             
-            // Add carrier ranges
+            // Adaugă intervalele de tarifare pentru transportator
             $this->addCarrierRanges($carrier);
             
-            // Set carrier groups
+            // Setează grupurile pentru transportator
             $this->addCarrierGroups($carrier);
             
-            // Set carrier zones
+            // Setează zonele pentru transportator
             $this->addCarrierZones($carrier);
             
-            // Set carrier logo
+            // Setează logo-ul transportatorului
             $this->addCarrierLogo($carrier);
             
             return true;
@@ -441,6 +446,21 @@ class FedexCarrier extends CarrierModule
             $this->context->controller->addJS($this->_path.'views/js/back.js');
             $this->context->controller->addCSS($this->_path.'views/css/back.css');
         }
+    }
+    /**
+     * Hook called during the carrier process
+     */
+    public function hookActionCarrierProcess($params)
+    {
+        // Aici poți adăuga logică specifică pentru când clientul selectează acest transportator
+        // De exemplu, poți verifica dacă transportatorul selectat este Fedex
+        if ($params['carrier']->id == $this->carrier_id) {
+            // Logică pentru procesarea transportatorului Fedex
+            // Exemplu: poți salva detalii suplimentare în sesiune sau baza de date
+            $this->context->cookie->fedex_selected = true;
+        }
+        
+        return true;
     }
 }
 
