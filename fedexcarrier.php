@@ -1,6 +1,6 @@
 <?php
 /**
- * 2024 Your Name
+ * 2024 Automatic House Systems
  *
  * NOTICE OF LICENSE
  *
@@ -9,8 +9,8 @@
  * It is also available through the world-wide-web at this URL:
  * http://opensource.org/licenses/afl-3.0.php
  *
- * @author    Your Name <your.email@example.com>
- * @copyright 2024 Your Name
+ * @author    Florin Simedru <simedruflorin@automatic-house.ro>
+ * @copyright 2024 Automatic House Systems
  * @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
  */
 
@@ -31,13 +31,13 @@ class FedexCarrier extends CarrierModule
     
     // Carrier settings
     private $carrier_id;
-    
+   
     public function __construct()
     {
         $this->name = 'fedexcarrier';
         $this->tab = 'shipping_logistics';
         $this->version = '1.0.0';
-        $this->author = 'Your Name';
+        $this->author = 'Florin Simedru';
         $this->need_instance = 0;
 
         $this->bootstrap = true;
