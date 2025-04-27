@@ -104,6 +104,7 @@ class FedexCarrier extends CarrierModule
         $carrier = new Carrier();
         
         $carrier->name = 'Fedex';
+        $carrier->url = 'https://www.fedex.com/fedextrack';
         $carrier->active = true;
         $carrier->deleted = 0;
         $carrier->shipping_handling = false;
@@ -120,26 +121,53 @@ class FedexCarrier extends CarrierModule
         $carrier->external_module_name = $this->name;
         $carrier->need_range = true;
         
-        // Adaugă aceste proprietăți pentru mai multă siguranță
-        $carrier->shipping_method = Carrier::SHIPPING_METHOD_WEIGHT;
-        $carrier->max_weight = 999;
+        // Setează explicit metoda de expediere și alte proprietăți necesare
+        $carrier->shipping_method = 1; // 1 pentru greutate, 2 pentru preț
+        $carrier->max_weight = 30.000;
+        $carrier->weight = 0;
         $carrier->grade = 9;
         
         if ($carrier->add()) {
             // Salvează ID-ul transportatorului
             Configuration::updateValue('FEDEX_CARRIER_ID', (int)$carrier->id);
             
+            // Setează zonele pentru transportator - important pentru vizibilitate!
+            $zones = Zone::getZones(true);
+            foreach ($zones as $zone) {
+                $carrier->addZone((int)$zone['id_zone']);
+            }
+            
             // Adaugă intervalele de tarifare pentru transportator
-            $this->addCarrierRanges($carrier);
+            $range_weight = new RangeWeight();
+            $range_weight->id_carrier = $carrier->id;
+            $range_weight->delimiter1 = 0;
+            $range_weight->delimiter2 = 30;
+            $range_weight->add();
+            
+            // Adaugă prețuri pentru fiecare zonă
+            foreach ($zones as $zone) {
+                Db::getInstance()->insert('delivery', array(
+                    'id_carrier' => (int)$carrier->id,
+                    'id_range_weight' => (int)$range_weight->id,
+                    'id_range_price' => 0,
+                    'id_zone' => (int)$zone['id_zone'],
+                    'price' => 10.0
+                ));
+            }
             
             // Setează grupurile pentru transportator
-            $this->addCarrierGroups($carrier);
-            
-            // Setează zonele pentru transportator
-            $this->addCarrierZones($carrier);
+            $groups = Group::getGroups(true);
+            foreach ($groups as $group) {
+                Db::getInstance()->insert('carrier_group', array(
+                    'id_carrier' => (int)$carrier->id,
+                    'id_group' => (int)$group['id_group']
+                ));
+            }
             
             // Setează logo-ul transportatorului
-            $this->addCarrierLogo($carrier);
+            if (!copy(dirname(__FILE__).'/views/img/fedex.jpg', _PS_SHIP_IMG_DIR_.'/'.(int)$carrier->id.'.jpg')) {
+                // Dacă există o eroare la copierea logo-ului, continuăm
+            }
             
             return true;
         }
