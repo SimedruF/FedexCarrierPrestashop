@@ -63,10 +63,21 @@ class FedexCarrier extends CarrierModule
      */
     public function install()
     {
+
+       // && $this->installCarrier()
+       // && $this->registerHook('actionCarrierUpdate') 
+       // && $this->registerHook('displayCarrierExtraContent') // sau alte hook-uri dacă ai
+       //  && $this->registerHook('displayBeforeCarrier');
+
         if (!parent::install() ||
+            !$this->installCarrier() ||
+            !$this->registerHook('actionCarrierUpdate') || 
+            !$this->registerHook('displayCarrierExtraContent') ||// sau alte hook-uri dacă ai
             !$this->registerHook('displayBackOfficeHeader') || 
             !$this->registerHook('actionCarrierProcess') ||
-            !$this->registerHook('updateCarrier')) {
+            !$this->registerHook('updateCarrier') ||
+            !$this->registerHook('displayBeforeCarrier')
+           ) {
             return false;
         }
 
@@ -103,7 +114,7 @@ class FedexCarrier extends CarrierModule
     {
         $carrier = new Carrier();
         
-        $carrier->name = 'Fedex';
+        $carrier->name = 'FedEx Carrier';
         $carrier->url = 'https://www.fedex.com/fedextrack';
         $carrier->active = true;
         $carrier->deleted = 0;
@@ -412,28 +423,28 @@ class FedexCarrier extends CarrierModule
     /**
      * Get shipping rates from Fedex API
      */
-    protected function getFedexShippingRate($address, $country, $weight)
-    {
-        // In a real implementation, you would build an XML request to the Fedex API
-        // Here's a simplified example that returns a fixed rate
+    // protected function getFedexShippingRate($address, $country, $weight)
+    // {
+    //     // In a real implementation, you would build an XML request to the Fedex API
+    //     // Here's a simplified example that returns a fixed rate
         
-        // This is where you would normally make an API call to Fedex
-        // For now, we're simulating the response
+    //     // This is where you would normally make an API call to Fedex
+    //     // For now, we're simulating the response
         
-        // Base rate for domestic shipping
-        $base_rate = 10.0;
+    //     // Base rate for domestic shipping
+    //     $base_rate = 10.0;
         
-        // Add weight surcharge (example: $1 per kg)
-        $weight_surcharge = $weight * 1.0;
+    //     // Add weight surcharge (example: $1 per kg)
+    //     $weight_surcharge = $weight * 1.0;
         
-        // Add distance surcharge
-        $distance_surcharge = ($country->iso_code == 'RO') ? 0 : 15.0;
+    //     // Add distance surcharge
+    //     $distance_surcharge = ($country->iso_code == 'RO') ? 0 : 15.0;
         
-        // Calculate total shipping cost
-        $total_cost = $base_rate + $weight_surcharge + $distance_surcharge;
+    //     // Calculate total shipping cost
+    //     $total_cost = $base_rate + $weight_surcharge + $distance_surcharge;
         
-        return $total_cost;
-    }
+    //     return $total_cost;
+    // }
     
     /**
      * Hook to update carrier ID when carrier is updated
@@ -494,5 +505,174 @@ class FedexCarrier extends CarrierModule
         
         return true;
     }
+    private function getFedexAccessToken()
+    {
+        $clientId = $this->fedex_key;         // API Key
+        $clientSecret = $this->fedex_password; // API Password
+        $authUrl = $this->fedex_test_mode
+            ? 'https://apis-sandbox.fedex.com/oauth/token' // Sandbox URL
+            : 'https://apis.fedex.com/oauth/token';        // Production URL
+    
+        $headers = [
+            'Content-Type: application/x-www-form-urlencoded'
+        ];
+    
+        $body = http_build_query([
+            'grant_type' => 'client_credentials',
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret
+        ]);
+    
+        $ch = curl_init($authUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+        $response = curl_exec($ch);
+        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    
+        if ($httpcode == 200) {
+            $data = json_decode($response, true);
+            if (isset($data['access_token'])) {
+                return $data['access_token'];
+            }
+        }
+    
+        return false;
+    }
+    protected function getFedexShippingRate($address, $country, $weight)
+    {
+        $accountNumber = $this->fedex_account;
+        $endpoint = $this->fedex_test_mode
+            ? 'https://apis-sandbox.fedex.com/rate/v1/rates/quotes'
+            : 'https://apis.fedex.com/rate/v1/rates/quotes';
+    
+        $accessToken = $this->getFedexAccessToken();
+        if (!$accessToken) {
+            return false; // Nu am putut obține tokenul
+        }
+    
+        $headers = [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $accessToken
+        ];
+    
+        $body = [
+            "accountNumber" => [
+                "value" => $accountNumber
+            ],
+            "requestedShipment" => [
+                "shipper" => [
+                    "address" => [
+                        "postalCode" => '10000',   // <-- cod poștal de expeditor (tu alegi unul fix sau din config)
+                        "countryCode" => 'RO'       // <-- țară expeditor
+                    ]
+                ],
+                "recipient" => [
+                    "address" => [
+                        "postalCode" => $address,     // <-- cod poștal destinatar
+                        "countryCode" => $country     // <-- țară destinatar
+                    ]
+                ],
+                "pickupType" => "DROPOFF_AT_FEDEX_LOCATION",
+                "rateRequestType" => ["ACCOUNT"],
+                "requestedPackageLineItems" => [
+                    [
+                        "weight" => [
+                            "units" => "KG",
+                            "value" => (float) $weight
+                        ]
+                    ]
+                ]
+            ]
+        ];
+    
+        $ch = curl_init($endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+        $response = curl_exec($ch);
+        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    
+        if ($httpcode == 200) {
+            $data = json_decode($response, true);
+            if (isset($data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'])) {
+                return (float) $data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'];
+            }
+        }
+    
+        return false;
+    }
+    
+    protected function installCarrier()
+    {
+        $carrier = new Carrier();
+        $carrier->name = 'FedEx Carrier'; // Numele care apare în Admin
+        $carrier->id_tax_rules_group = 0; // Fără reguli de taxe
+        $carrier->active = 1; // Activ
+        $carrier->deleted = 0; // Nu este șters
+        $carrier->shipping_handling = false; // Nu aplică handling cost
+        $carrier->range_behavior = 0;
+        $carrier->is_module = true; // Este creat de un modul
+        $carrier->external_module_name = $this->name; // Numele modulului
+        $carrier->need_range = true; // Are nevoie de range (min weight / max weight)
+        $carrier->shipping_external = true; // Transport extern
+        $carrier->url = 'https://www.fedex.com/fedextrack/?tracknumbers=@'; // URL de tracking
+
+        // Setez delay-ul pentru fiecare limbă
+        foreach (Language::getLanguages(true) as $language) {
+            $carrier->delay[(int) $language['id_lang']] = 'Livrare prin FedEx';
+        }
+
+        if (!$carrier->add()) {
+            return false;
+        }
+
+        // Salvez ID-ul Carrier creat
+        Configuration::updateValue('FEDEX_CARRIER_ID', (int) $carrier->id);
+
+        // Asociez Carrier-ul cu toate grupurile de utilizatori
+        $groups = Group::getGroups(true);
+        foreach ($groups as $group) {
+            Db::getInstance()->insert('carrier_group', [
+                'id_carrier' => (int) $carrier->id,
+                'id_group' => (int) $group['id_group']
+            ]);
+        }
+
+        // Asociez Carrier-ul cu toate zonele
+        $zones = Zone::getZones(true);
+        foreach ($zones as $zone) {
+            Db::getInstance()->insert('carrier_zone', [
+                'id_carrier' => (int) $carrier->id,
+                'id_zone' => (int) $zone['id_zone']
+            ]);
+        }
+
+        // Asociez Carrier-ul cu toate magazinele (pentru multistore)
+        $shops = Shop::getShops(true);
+        foreach ($shops as $shop) {
+            Db::getInstance()->insert('carrier_shop', [
+                'id_carrier' => (int) $carrier->id,
+                'id_shop' => (int) $shop['id_shop']
+            ]);
+        }
+
+        // Creez range-uri de greutate default (0kg - 1000kg)
+        $rangeWeight = new RangeWeight();
+        $rangeWeight->id_carrier = (int) $carrier->id;
+        $rangeWeight->delimiter1 = 0;
+        $rangeWeight->delimiter2 = 1000;
+        $rangeWeight->add();
+
+        return true;
+    }
+
+
 }
 
