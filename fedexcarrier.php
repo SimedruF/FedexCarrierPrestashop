@@ -63,16 +63,9 @@ class FedexCarrier extends CarrierModule
      */
     public function install()
     {
-
-       // && $this->installCarrier()
-       // && $this->registerHook('actionCarrierUpdate') 
-       // && $this->registerHook('displayCarrierExtraContent') // sau alte hook-uri dacă ai
-       //  && $this->registerHook('displayBeforeCarrier');
-
         if (!parent::install() ||
-            !$this->installCarrier() ||
             !$this->registerHook('actionCarrierUpdate') || 
-            !$this->registerHook('displayCarrierExtraContent') ||// sau alte hook-uri dacă ai
+            !$this->registerHook('displayCarrierExtraContent') ||
             !$this->registerHook('displayBackOfficeHeader') || 
             !$this->registerHook('actionCarrierProcess') ||
             !$this->registerHook('updateCarrier') ||
@@ -121,7 +114,7 @@ class FedexCarrier extends CarrierModule
         $carrier->shipping_handling = false;
         $carrier->range_behavior = 0;
         
-        // Setează delay pentru toate limbile active
+        // Set delay for all active languages
         $languages = Language::getLanguages(true);
         foreach ($languages as $language) {
             $carrier->delay[$language['id_lang']] = 'Deliver with Fedex';
@@ -132,30 +125,30 @@ class FedexCarrier extends CarrierModule
         $carrier->external_module_name = $this->name;
         $carrier->need_range = true;
         
-        // Setează explicit metoda de expediere și alte proprietăți necesare
-        $carrier->shipping_method = 1; // 1 pentru greutate, 2 pentru preț
+        // Explicitly set the shipping method and other necessary properties
+        $carrier->shipping_method = 1; // 1 for weight, 2 for price
         $carrier->max_weight = 30.000;
         $carrier->weight = 0;
         $carrier->grade = 9;
         
         if ($carrier->add()) {
-            // Salvează ID-ul transportatorului
+            // Save the carrier ID
             Configuration::updateValue('FEDEX_CARRIER_ID', (int)$carrier->id);
             
-            // Setează zonele pentru transportator - important pentru vizibilitate!
+            // Set zones for the carrier - important for visibility!
             $zones = Zone::getZones(true);
             foreach ($zones as $zone) {
                 $carrier->addZone((int)$zone['id_zone']);
             }
             
-            // Adaugă intervalele de tarifare pentru transportator
+            // Add weight ranges for the carrier
             $range_weight = new RangeWeight();
             $range_weight->id_carrier = $carrier->id;
             $range_weight->delimiter1 = 0;
             $range_weight->delimiter2 = 30;
             $range_weight->add();
             
-            // Adaugă prețuri pentru fiecare zonă
+            // Add prices for each zone
             foreach ($zones as $zone) {
                 Db::getInstance()->insert('delivery', array(
                     'id_carrier' => (int)$carrier->id,
@@ -166,7 +159,7 @@ class FedexCarrier extends CarrierModule
                 ));
             }
             
-            // Setează grupurile pentru transportator
+            // Set groups for the carrier
             $groups = Group::getGroups(true);
             foreach ($groups as $group) {
                 Db::getInstance()->insert('carrier_group', array(
@@ -175,9 +168,9 @@ class FedexCarrier extends CarrierModule
                 ));
             }
             
-            // Setează logo-ul transportatorului
+            // Set the carrier logo
             if (!copy(dirname(__FILE__).'/views/img/fedex.jpg', _PS_SHIP_IMG_DIR_.'/'.(int)$carrier->id.'.jpg')) {
-                // Dacă există o eroare la copierea logo-ului, continuăm
+                // If there's an error copying the logo, continue
             }
             
             return true;
@@ -270,6 +263,7 @@ class FedexCarrier extends CarrierModule
             $output .= $this->displayConfirmation($this->l('Settings updated'));
         }
         
+        $output .= $this->getContentTest();
         // Show configuration form
         return $output.$this->renderForm();
     }
@@ -423,28 +417,80 @@ class FedexCarrier extends CarrierModule
     /**
      * Get shipping rates from Fedex API
      */
-    // protected function getFedexShippingRate($address, $country, $weight)
-    // {
-    //     // In a real implementation, you would build an XML request to the Fedex API
-    //     // Here's a simplified example that returns a fixed rate
+    protected function getFedexShippingRate($address, $country, $weight)
+    {
+        $fedex_test_mode = (bool)Configuration::get('FEDEX_TEST_MODE');
+
+        if ($fedex_test_mode) {
+            // Return simulated data for Test Mode
+            $fedex_response =  $this->getDefaultFedexTestResponse();
+            return $this->getFedexShippingRateTotal($country, $weight);
+        }
+
+        $accountNumber = $this->fedex_account;
+        $endpoint = $this->fedex_test_mode
+            ? 'https://apis-sandbox.fedex.com/rate/v1/rates/quotes'
+            : 'https://apis.fedex.com/rate/v1/rates/quotes';
+    
+        $accessToken = $this->getFedexAccessToken();
+        if (!$accessToken) {
+            return false; // Could not obtain the token
+        }
+    
+        $headers = [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $accessToken
+        ];
+    
+        $body = [
+            "accountNumber" => [
+                "value" => $accountNumber
+            ],
+            "requestedShipment" => [
+                "shipper" => [
+                    "address" => [
+                        "postalCode" => '10000',   // <-- sender postal code (you choose a fixed one or from config)
+                        "countryCode" => 'RO'       // <-- sender country
+                    ]
+                ],
+                "recipient" => [
+                    "address" => [
+                        "postalCode" => $address,     // <-- recipient postal code
+                        "countryCode" => $country     // <-- recipient country
+                    ]
+                ],
+                "pickupType" => "DROPOFF_AT_FEDEX_LOCATION",
+                "rateRequestType" => ["ACCOUNT"],
+                "requestedPackageLineItems" => [
+                    [
+                        "weight" => [
+                            "units" => "KG",
+                            "value" => (float) $weight
+                        ]
+                    ]
+                ]
+            ]
+        ];
+    
+        $ch = curl_init($endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+        $response = curl_exec($ch);
+        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
         
-    //     // This is where you would normally make an API call to Fedex
-    //     // For now, we're simulating the response
-        
-    //     // Base rate for domestic shipping
-    //     $base_rate = 10.0;
-        
-    //     // Add weight surcharge (example: $1 per kg)
-    //     $weight_surcharge = $weight * 1.0;
-        
-    //     // Add distance surcharge
-    //     $distance_surcharge = ($country->iso_code == 'RO') ? 0 : 15.0;
-        
-    //     // Calculate total shipping cost
-    //     $total_cost = $base_rate + $weight_surcharge + $distance_surcharge;
-        
-    //     return $total_cost;
-    // }
+        if ($httpcode == 200) {
+            $data = json_decode($response, true);
+            if (isset($data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'])) {
+                return (float) $data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'];
+            }
+        }
+    
+        return false;
+    }
     
     /**
      * Hook to update carrier ID when carrier is updated
@@ -507,6 +553,13 @@ class FedexCarrier extends CarrierModule
     }
     private function getFedexAccessToken()
     {
+        $fedex_test_mode = (bool)Configuration::get('FEDEX_TEST_MODE');
+
+        // Dacă Test Mode este activat, returnează un token simulant
+        if ($fedex_test_mode) {
+            return $this->getDefaultFedexAccessToken();
+        }
+
         $clientId = $this->fedex_key;         // API Key
         $clientSecret = $this->fedex_password; // API Password
         $authUrl = $this->fedex_test_mode
@@ -532,83 +585,44 @@ class FedexCarrier extends CarrierModule
         $response = curl_exec($ch);
         $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-    
+        $data = json_decode($response, true);
         if ($httpcode == 200) {
-            $data = json_decode($response, true);
+            
             if (isset($data['access_token'])) {
                 return $data['access_token'];
             }
         }
+        else {
+            // echo '<pre>OAuth Error: ';
+            // print_r($data);
+            // echo '</pre>';
+            // die();
+        }
     
         return false;
     }
-    protected function getFedexShippingRate($address, $country, $weight)
+    protected function getFedexShippingRateTotal( $country, $weight)
     {
-        $accountNumber = $this->fedex_account;
-        $endpoint = $this->fedex_test_mode
-            ? 'https://apis-sandbox.fedex.com/rate/v1/rates/quotes'
-            : 'https://apis.fedex.com/rate/v1/rates/quotes';
-    
-        $accessToken = $this->getFedexAccessToken();
-        if (!$accessToken) {
-            return false; // Nu am putut obține tokenul
-        }
-    
-        $headers = [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $accessToken
-        ];
-    
-        $body = [
-            "accountNumber" => [
-                "value" => $accountNumber
-            ],
-            "requestedShipment" => [
-                "shipper" => [
-                    "address" => [
-                        "postalCode" => '10000',   // <-- cod poștal de expeditor (tu alegi unul fix sau din config)
-                        "countryCode" => 'RO'       // <-- țară expeditor
-                    ]
-                ],
-                "recipient" => [
-                    "address" => [
-                        "postalCode" => $address,     // <-- cod poștal destinatar
-                        "countryCode" => $country     // <-- țară destinatar
-                    ]
-                ],
-                "pickupType" => "DROPOFF_AT_FEDEX_LOCATION",
-                "rateRequestType" => ["ACCOUNT"],
-                "requestedPackageLineItems" => [
-                    [
-                        "weight" => [
-                            "units" => "KG",
-                            "value" => (float) $weight
-                        ]
-                    ]
-                ]
-            ]
-        ];
-    
-        $ch = curl_init($endpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    
-        $response = curl_exec($ch);
-        $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-    
-        if ($httpcode == 200) {
-            $data = json_decode($response, true);
-            if (isset($data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'])) {
-                return (float) $data['output']['rateReplyDetails'][0]['ratedShipmentDetails'][0]['totalNetChargeWithDutiesAndTaxes']['amount'];
-            }
-        }
-    
-        return false;
+        // In a real implementation, you would build an XML request to the Fedex API
+        // Here's a simplified example that returns a fixed rate
+        
+        // This is where you would normally make an API call to Fedex
+        // For now, we're simulating the response
+        
+        // Base rate for domestic shipping
+        $base_rate = 10.0;
+        
+        // Add weight surcharge (example: $1 per kg)
+        $weight_surcharge = (float)$weight * 1.0;
+        
+        // Add distance surcharge
+        $distance_surcharge = ($country->iso_code == 'RO') ? 0 : 15.0;
+        
+        // Calculate total shipping cost
+        $total_cost = $base_rate + $weight_surcharge + $distance_surcharge;
+        
+        return $total_cost;
     }
-    
     protected function installCarrier()
     {
         $carrier = new Carrier();
@@ -623,6 +637,12 @@ class FedexCarrier extends CarrierModule
         $carrier->need_range = true; // Are nevoie de range (min weight / max weight)
         $carrier->shipping_external = true; // Transport extern
         $carrier->url = 'https://www.fedex.com/fedextrack/?tracknumbers=@'; // URL de tracking
+
+        // Setează explicit metoda de expediere și alte proprietăți necesare
+        $carrier->shipping_method = 1; // 1 pentru greutate, 2 pentru preț
+        $carrier->max_weight = 68.000;
+        $carrier->weight = 0;
+        $carrier->grade = 9;
 
         // Setez delay-ul pentru fiecare limbă
         foreach (Language::getLanguages(true) as $language) {
@@ -670,9 +690,313 @@ class FedexCarrier extends CarrierModule
         $rangeWeight->delimiter2 = 1000;
         $rangeWeight->add();
 
+        // Setează logo-ul transportatorului
+        if (!copy(dirname(__FILE__).'/views/img/fedex.jpg', _PS_SHIP_IMG_DIR_.'/'.(int)$carrier->id.'.jpg')) {
+                // Dacă există o eroare la copierea logo-ului, continuăm
+        }
+
         return true;
     }
+    public function hookDisplayCarrierExtraContent($params)
+    {
+        return ''; // Momentan nu afișăm nimic
+    }
+    public function testCreateCarrier()
+    {
+        if ($this->createCarrier()) {
+            return $this->displayConfirmation('Carrier created successfully. ID: ' . Configuration::get('FEDEX_CARRIER_ID'));
+        } else {
+            return $this->displayError('Failed to create carrier.');
+        }
+    }
 
+    // Modifică getContent() pentru a adăuga un buton de test
+    public function getContentTest()
+    {
+        $output = '';
+        
+        // Apelăm verificarea carrierului FedEx
+        $output .= $this->checkFedexCarrier();
 
+        // Test carrier creation
+        if (Tools::isSubmit('testCreateCarrier')) {
+            $output .= $this->testCreateCarrier();
+        }
+        
+        // Process form submission
+        if (Tools::isSubmit('submit'.$this->name)) {
+            // existing code...
+        }
+        
+        // Adaugă butonul de test
+        $output .= '<br> <div class="panel">
+            <div class="panel-heading">Test Functions</div>
+            <form action="'.Tools::safeOutput($_SERVER['REQUEST_URI']).'" method="post">
+                <button type="submit" name="testCreateCarrier" class="btn btn-default">
+                    Test Create Carrier
+                </button>
+            </form>
+        </div>';
+        
+
+        if (Tools::isSubmit('check_fedex')) {
+            $output .= $this->diagnoseFedexCarrier((int)Tools::getValue('id_customer'));
+        }
+    
+        $output .= '
+        <br>
+        <div class="panel">
+            <form method="post">
+                <input type="hidden" name="check_fedex" value="1">
+                <label for="id_customer">ID Client:</label>
+                <input type="text" name="id_customer" id="id_customer" required>
+                <button type="submit" class="btn btn-primary">Verifică FedEx pentru client</button>
+            </form>
+            </div>
+        ';
+
+        // Verificăm dacă utilizatorul a apăsat butonul pentru testarea API-ului
+        if (Tools::isSubmit('check_fedex_api')) {
+            // Îl vom apela pe funcția care efectuează testul API-ului FedEx
+            $output .= $this->testFedexAPI();
+        }
+
+        // Formularul pentru a testa API-ul FedEx
+        $output .= '<br>
+        <div class="panel">
+            <form method="post">
+                <input type="hidden" name="check_fedex_api" value="1">
+                <h3>Testați apelul API FedEx</h3>
+                <button type="submit" class="btn btn-primary">Verificați API-ul FedEx</button>
+            </form>
+           </div>  
+        ';
+        // Show configuration form
+        return $output;
+    }
+    protected function checkFedexCarrier()
+    {
+        $carrierName = 'FedEx'; // Numele carrier-ului tău
+        $carrier = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier 
+            WHERE name LIKE "%'.$carrierName.'%" AND deleted = 0
+        ');
+    
+        if (!$carrier) {
+            return '<div class="alert alert-danger">❌ Carrier-ul FedEx nu există în baza de date sau este șters!</div>';
+        }
+    
+        $carrierId = (int)$carrier['id_carrier'];
+        $messages = [];
+    
+        // Verificare active
+        if ((int)$carrier['active'] !== 1) {
+            $messages[] = '⚠️ Carrier-ul există, dar NU este activ!';
+        } else {
+            $messages[] = '✅ Carrier-ul este activ.';
+        }
+    
+        // Verificare legătura cu magazinul
+        $shopLink = Db::getInstance()->getRow("
+            SELECT * FROM "._DB_PREFIX_."carrier_shop 
+            WHERE id_carrier = ".$carrierId);
+        if (!$shopLink) {
+            $messages[] = '⚠️ Carrier-ul nu este asociat cu niciun magazin!';
+        } else {
+            $messages[] = '✅ Carrier-ul este asociat cu magazinul.';
+        }
+    
+        // Verificare legătura cu zone
+        $zoneLink = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier_zone 
+            WHERE id_carrier = '.$carrierId);
+        if (!$zoneLink) {
+            $messages[] = '⚠️ Carrier-ul nu este asociat cu nicio zonă!';
+        } else {
+            $messages[] = '✅ Carrier-ul este asociat cu cel puțin o zonă.';
+        }
+    
+        // Verificare legătura cu grupuri
+        $groupLink = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier_group 
+            WHERE id_carrier = '.$carrierId);
+        if (!$groupLink) {
+            $messages[] = '⚠️ Carrier-ul nu este asociat cu niciun grup de utilizatori!';
+        } else {
+            $messages[] = '✅ Carrier-ul este asociat cu grupuri de utilizatori.';
+        }
+    
+        // Combină toate mesajele
+        return '<div class="alert alert-info"><strong>Verificare FedEx Carrier:</strong><ul><li>' 
+                . implode('</li><li>', $messages) . 
+               '</li></ul></div>';
+    }
+    protected function diagnoseFedexCarrier($id_customer)
+    {
+        $output = '';
+        $carrierName = 'FedEx';
+
+        // Găsim carrier-ul FedEx
+        $carrier = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier 
+            WHERE name LIKE "%'.$carrierName.'%" AND deleted = 0');
+
+        if (!$carrier) {
+            return '<div class="alert alert-danger">❌ Carrier-ul FedEx nu există!</div>';
+        }
+
+        $id_carrier = (int)$carrier['id_carrier'];
+        $output .= "<h3>✅ Carrier FedEx găsit (ID: $id_carrier)</h3>";
+
+        // Găsim clientul
+        $customer = new Customer($id_customer);
+        if (!Validate::isLoadedObject($customer)) {
+            return '<div class="alert alert-danger">❌ Clientul nu există!</div>';
+        }
+
+        $output .= '<p>Client: '.$customer->firstname.' '.$customer->lastname.'</p>';
+
+        // Găsim adresa principală
+        $id_address = (int)Address::getFirstCustomerAddressId($id_customer);
+        if (!$id_address) {
+            return '<div class="alert alert-danger">❌ Clientul nu are adresă salvată!</div>';
+        }
+
+        $address = new Address($id_address);
+        $id_country = (int)$address->id_country;
+        $id_state = (int)$address->id_state;
+        $id_zone = Address::getZoneById($id_address);
+
+        $output .= '<p>Adresa clientului: '.$address->address1.', '.$address->city.'</p>';
+
+        // Verificăm zona
+        $zone = new Zone($id_zone);
+        if (!Validate::isLoadedObject($zone)) {
+            $output .= '<div class="alert alert-danger">❌ Zona adresei clientului nu există!</div>';
+        } else {
+            $output .= '<p>✅ Zona clientului: '.$zone->name.'</p>';
+        }
+
+        // Verificăm dacă carrier-ul e asociat cu zona
+        $zoneLink = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier_zone WHERE id_carrier = '.$id_carrier.' AND id_zone = '.$id_zone);
+        if (!$zoneLink) {
+            $output .= '<div class="alert alert-danger">❌ Carrier-ul FedEx NU este asociat cu zona clientului ('.$zone->name.')!</div>';
+        } else {
+            $output .= '<p>✅ Carrier-ul este asociat cu zona clientului.</p>';
+        }
+
+        // Verificăm dacă există un range de greutate
+        $range = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'range_weight WHERE id_carrier = '.$id_carrier);
+        if (!$range) {
+            $output .= '<div class="alert alert-danger">❌ Carrier-ul NU are definit un range de greutate!</div>';
+        } else {
+            $output .= '<p>✅ Carrier-ul are range de greutate: '.$range['delimiter1'].'kg - '.$range['delimiter2'].'kg</p>';
+        }
+
+        // Verificăm dacă există tarife în ps_delivery
+        $delivery = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'delivery WHERE id_carrier = '.$id_carrier.' AND id_zone = '.$id_zone);
+        if (!$delivery) {
+            $output .= '<div class="alert alert-danger">❌ Nu există tarife de livrare definite pentru zona clientului!</div>';
+        } else {
+            $output .= '<p>✅ Tarife de livrare existente pentru zona clientului.</p>';
+        }
+
+        // Verificăm delay-ul (descrierea livrării)
+        $langId = (int)Configuration::get('PS_LANG_DEFAULT');
+        $carrierLang = Db::getInstance()->getRow('
+            SELECT * FROM '._DB_PREFIX_.'carrier_lang WHERE id_carrier = '.$id_carrier.' AND id_lang = '.$langId);
+        if (empty($carrierLang['delay'])) {
+            $output .= '<div class="alert alert-danger">❌ Nu există delay (timp de livrare) definit pentru carrier!</div>';
+        } else {
+            $output .= '<p>✅ Delay setat: '.$carrierLang['delay'].'</p>';
+        }
+
+        // Verificăm grupurile de clienți
+        $groups = Customer::getGroupsStatic($id_customer);
+        $group_ok = false;
+        foreach ($groups as $group) {
+            $groupLink = Db::getInstance()->getRow('
+                SELECT * FROM '._DB_PREFIX_.'carrier_group 
+                WHERE id_carrier = '.$id_carrier.' AND id_group = '.(int)$group);
+            if ($groupLink) {
+                $group_ok = true;
+                break;
+            }
+        }
+        if (!$group_ok) {
+            $output .= '<div class="alert alert-danger">❌ Carrier-ul FedEx nu este asociat cu grupul clientului!</div>';
+        } else {
+            $output .= '<p>✅ Carrier-ul este asociat cu grupul clientului.</p>';
+        }
+
+        return '<div class="alert alert-info">'.$output.'</div>';
+    }
+    // Funcția care efectuează apelul la API-ul FedEx și returnează rezultatul
+    public function testFedexAPI()
+    {
+        // Get cart details
+        //$address = new Address($params->id_address_delivery);
+        $country = new Country(3);
+
+        // Setează variabilele de configurare pentru accesul la API
+        $fedex_key = Configuration::get('FEDEX_KEY');
+        $fedex_password = Configuration::get('FEDEX_PASSWORD');
+        $fedex_account = Configuration::get('FEDEX_ACCOUNT');
+        $fedex_meter = Configuration::get('FEDEX_METER');
+        $fedex_test_mode = (bool)Configuration::get('FEDEX_TEST_MODE');
+
+        // URL-ul API-ului (sandbox sau live, în funcție de setări)
+        $url = $fedex_test_mode
+            ? 'https://apis-sandbox.fedex.com/rate/v1/rates/quotes'
+            : 'https://apis.fedex.com/rate/v1/rates/quotes';
+
+        // Obține token-ul de acces
+        $token = $this->getFedexAccessToken($fedex_key, $fedex_password, $fedex_test_mode);
+
+        // Trimite cererea către API-ul FedEx pentru calculul tarifelor
+        $response = $this->getFedexShippingRate($token,$country,"");
+
+        // Întoarcerea rezultatului API
+        if ($response) {
+            return '<pre>' . print_r($response, true) . '</pre>';
+        } else {
+            return '<p>Eroare la apelul API FedEx. Vă rugăm să verificați setările API.</p>';
+        }
+    }
+    // Funcția care returnează un răspuns simulant pentru Test Mode
+    private function getDefaultFedexTestResponse()
+    {
+        // Date simulate ca un răspuns de la API-ul FedEx
+        return [
+            "rateReply" => [
+                "rateReplyDetails" => [
+                    [
+                        "serviceType" => "FEDEX_GROUND",
+                        "deliveryTimestamp" => "2025-04-27T12:00:00-07:00",
+                        "totalNetCharge" => [
+                            "currency" => "RON",
+                            "amount" => "15.00"
+                        ],
+                        "rateAsString" => "15.00",
+                        "billingWeight" => [
+                            "units" => "KG",
+                            "value" => 2
+                        ],
+                        "weightUnits" => "KG",
+                        "weight" => 2
+                    ]
+                ]
+            ]
+        ];
+    }
+    // Funcția care returnează un access token simulant pentru Test Mode
+    private function getDefaultFedexAccessToken()
+    {
+        // Răspuns simulant pentru Test Mode - un token de acces
+        return 'default_test_access_token_12345';
+    }
 }
 
