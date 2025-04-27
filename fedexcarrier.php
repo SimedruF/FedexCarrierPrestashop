@@ -410,4 +410,26 @@ class FedexCarrier extends CarrierModule
             Configuration::updateValue('FEDEX_CARRIER_ID', $id_carrier_new);
         }
     }
+    /**
+     * Calculate shipping cost from external shipping api
+     */
+    public function getOrderShippingCostExternal($params)
+    {
+        // Get cart details
+        $address = new Address($params->id_address_delivery);
+        $country = new Country($address->id_country);
+        
+        // Calculate total weight
+        $weight = $this->getCartTotalWeight($params);
+        
+        // Get shipping cost from Fedex API
+        $cost = $this->getFedexShippingRate($address, $country, $weight);
+        
+        if ($cost !== false) {
+            return $cost;
+        }
+        
+        return false;
+    }
 }
+
